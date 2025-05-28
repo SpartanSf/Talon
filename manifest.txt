@@ -1,0 +1,7 @@
+file format.lua format.lua
+file lex.lua lex.lua
+file minify.lua minify.lua
+file runTalon.lua runTalon.lua
+file talon.lua talon.lua
+dir talonlibs
+file talonlibs/io.lua talonlibs/io.lua
