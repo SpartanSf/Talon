@@ -1,4 +1,4 @@
-#!/runTalon
+#!/runTalon_nocache
 use /talonlibs/io;
 
 define void main() {

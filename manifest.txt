@@ -1,7 +1,8 @@
 file format.lua format.lua
 file lex.lua lex.lua
 file minify.lua minify.lua
-file runTalon.lua runTalon.lua
+file runTalon_noncache.lua runTalon_nocache.lua
+file runTalon_cache.lua runTalon_cache.lua
 file talon.lua talon.lua
 dir talonlibs
 file talonlibs/io.lua talonlibs/io.lua
