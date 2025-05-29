@@ -12,8 +12,15 @@ function talon.tokenize(code)
     while true do
         if i > #code then break end
         local c = code:sub(i, i)
+        local nextChar = code:sub(i + 1, i + 1)
 
-        if c:match("%s") then
+        if c == "/" and nextChar == "/" then
+            i = i + 2
+            while i <= #code and code:sub(i, i) ~= "\n" do
+                i = i + 1
+            end
+            spacing = 1
+        elseif c:match("%s") then
             if current ~= "" then
                 table.insert(result, { text = current, spacing = spacing })
                 current = ""
@@ -47,7 +54,7 @@ function talon.tokenize(code)
     end
 
     if current ~= "" then
-        table.insert(result, current)
+        table.insert(result, { text = current, spacing = spacing })
     end
 
     return result
@@ -117,20 +124,31 @@ local function parseLet(tokens)
     return initial.text
 end
 
+local function parseIdentifier(tokens, vars)
+    while #tokens > 0 do
+        next = table.remove(tokens, 1).text
+        if next == "=" or next == ";" then return end
+        if next ~= "," then vars[#vars + 1] = next end
+    end
+end
+
 function walkStatement(initial, tokens)
+    local peek = tokens[1] and tokens[1].text
     if initial == "define" then
         local defineType = table.remove(tokens, 1).text
         local defineName = table.remove(tokens, 1).text
         local argLen = parseParameterList(tokens)
         assert(table.remove(tokens, 1).text == "{", "Expected '{' to start function body")
         local blockContent = walkBody(tokens)
+        local blockLast = blockContent[#blockContent]
         assert(table.remove(tokens, 1).text == ";", "Expected closing ';'")
         return {
             type = "define",
             defineType = defineType,
             defineName = defineName,
             argLen = argLen,
-            blockContent = blockContent
+            blockContent = blockContent,
+            blockLast = blockLast
         }
     elseif initial == "if" then
         local condition = parseIfList(tokens)
@@ -155,9 +173,11 @@ function walkStatement(initial, tokens)
             value = value
         }
     elseif initial == "return" then
+        local returnList = parseCallList(tokens)
         assert(table.remove(tokens, 1).text == ";", "Expected closing ';'")
         return {
-            type = "return"
+            type = "return",
+            returnList = returnList
         }
     elseif initial == "use" then
         local libPath = table.remove(tokens, 1).text
@@ -166,34 +186,46 @@ function walkStatement(initial, tokens)
             type = "use",
             libPath = libPath
         }
-    elseif tokens[1].text == "(" then
-        local funcName = initial
+    elseif peek == "(" then
         local callList = parseCallList(tokens)
         assert(table.remove(tokens, 1).text == ";", "Expected closing ';'")
         return {
             type = "func_call",
-            funcName = funcName,
+            funcName = initial,
             callList = callList
         }
-    elseif tokens[1].text == "+=" or tokens[1].text == "-=" or tokens[1].text == "*=" or tokens[1].text == "/=" then
-        local lefthand = initial
+    elseif peek == "+=" or peek == "-=" or peek == "*=" or peek == "/=" then
         local operation = table.remove(tokens, 1).text
         local righthand = table.remove(tokens, 1).text
+        assert(table.remove(tokens, 1).text == ";", "Expected closing ';'")
         return {
             type = "self_op",
-            lefthand = lefthand,
+            lefthand = initial,
             operation = operation,
             righthand = righthand
         }
-    elseif tokens[1].text == "=" then
-        local lefthand = initial
-        local _ = table.remove(tokens, 1)
-        local righthand = table.remove(tokens, 1).text
+    elseif peek == "=" then
+        local lefthand = { initial }
+        table.remove(tokens, 1)
+        local righthand = {}
+        parseIdentifier(tokens, righthand)
         return {
             type = "assignment",
             lefthand = lefthand,
             righthand = righthand
         }
+    elseif peek == "," then
+        local lefthand = { initial }
+        parseIdentifier(tokens, lefthand)
+        local righthand = {}
+        parseIdentifier(tokens, righthand)
+        return {
+            type = "assignment",
+            lefthand = lefthand,
+            righthand = righthand
+        }
+    else
+        error("Unknown statement pattern starting with: " .. initial)
     end
 end
 
@@ -213,6 +245,9 @@ end
 
 function talon.buildAST(tokens)
     local ast = {}
+    if tokens[1] and tokens[1].text:sub(1, 2) == "#!" then
+        table.remove(tokens, 1)
+    end
     while #tokens > 0 do
         local initial = table.remove(tokens, 1)
         ast[#ast + 1] = walkStatement(initial.text, tokens)
@@ -235,10 +270,8 @@ local blockHandlers = {
             code[#code] = code[#code] .. ")"
             parseBlock(code, block.blockContent, "lua")
 
-            local codeEnd = code[#code]
-            local codeEndTokens = talon.tokenize(codeEnd)
-            if codeEndTokens[2].text == "(" then
-                code[#code] = "return " .. codeEnd
+            if block.blockLast.type == "func_call" and block.blockLast.funcName == block.defineName then
+                code[#code] = "return " .. code[#code]
             end
 
             code[#code + 1] = "end"
@@ -265,10 +298,43 @@ local blockHandlers = {
             code[#code + 1] = block.lefthand .. "=" .. block.lefthand .. block.operation:sub(1, -2) .. block.righthand
         end,
         statement_assignment = function(code, block)
-            code[#code + 1] = block.lefthand .. "=" .. block.righthand
+            code[#code + 1] = ""
+            local added = false
+            for _, name in ipairs(block.lefthand) do
+                if name == "(" then
+                    code[#code] = code[#code]:sub(1, -2)
+                elseif name == ")" then
+                    code[#code] = code[#code]:sub(1, -2)
+                else
+                    added = true
+                end
+                code[#code] = code[#code] .. name
+                if name ~= "(" then code[#code] = code[#code] .. "," end
+            end
+            if added then code[#code] = code[#code]:sub(1, -2) end
+            code[#code] = code[#code] .. "="
+            added = false
+            for _, name in ipairs(block.righthand) do
+                if name == "(" then
+                    code[#code] = code[#code]:sub(1, -2)
+                elseif name == ")" then
+                    code[#code] = code[#code]:sub(1, -2)
+                else
+                    added = true
+                end
+                code[#code] = code[#code] .. name
+                if name ~= "(" then code[#code] = code[#code] .. "," end
+            end
+            if added then code[#code] = code[#code]:sub(1, -2) end
         end,
         statement_return = function(code, block)
-            code[#code + 1] = "return"
+            code[#code + 1] = "return "
+            local added = false
+            for _, returns in ipairs(block.returnList) do
+                code[#code] = code[#code] .. returns .. ","
+                added = true
+            end
+            if added then code[#code] = code[#code]:sub(1, -2) end
         end,
         statement_use = function(code, block)
             local parts = {}
@@ -328,6 +394,7 @@ end
 function talon.process(code, lang, release)
     if not release then
         return format(table.concat(talon.compile(talon.buildAST(talon.tokenize(code)), lang), "\n"))
+        --return table.concat(talon.compile(talon.buildAST(talon.tokenize(code)), lang), "\n")
     else
         local data = format(table.concat(talon.compile(talon.buildAST(talon.tokenize(code)), lang), "\n"))
         local tokens = lex(data, 1, 2)
