@@ -124,12 +124,13 @@ local function parseLet(tokens)
     return initial.text
 end
 
-local function parseIdentifier(tokens, vars)
+local function parseIdentifier(tokens, data)
     while #tokens > 0 do
         next = table.remove(tokens, 1).text
-        if next == "=" or next == ";" then return end
-        if next ~= "," then vars[#vars + 1] = next end
+        if next == "=" or next == ";" then break end
+        data = data .. next
     end
+    return data
 end
 
 function walkStatement(initial, tokens)
@@ -194,7 +195,16 @@ function walkStatement(initial, tokens)
             funcName = initial,
             callList = callList
         }
-    elseif peek == "+=" or peek == "-=" or peek == "*=" or peek == "/=" then
+    elseif peek == "+=" or peek == "-=" or
+        peek == "*=" or peek == "/=" or
+        peek == "..=" or peek == "and=" or
+        peek == "or=" or peek == "%=" or
+        peek == "^=" or peek == "===" or
+        peek == "====" or peek == "apply" or
+        peek == "!==" or peek == "!===" or
+        peek == "<<=" or peek == ">>=" or 
+        peek == "&=" or peek == "|=" or
+        peek == "<<<=" or peek == ">>>=" then
         local operation = table.remove(tokens, 1).text
         local righthand = table.remove(tokens, 1).text
         assert(table.remove(tokens, 1).text == ";", "Expected closing ';'")
@@ -205,20 +215,20 @@ function walkStatement(initial, tokens)
             righthand = righthand
         }
     elseif peek == "=" then
-        local lefthand = { initial }
+        local lefthand = initial
         table.remove(tokens, 1)
-        local righthand = {}
-        parseIdentifier(tokens, righthand)
+        local righthand = ""
+        righthand = parseIdentifier(tokens, righthand)
         return {
             type = "assignment",
             lefthand = lefthand,
             righthand = righthand
         }
     elseif peek == "," then
-        local lefthand = { initial }
-        parseIdentifier(tokens, lefthand)
-        local righthand = {}
-        parseIdentifier(tokens, righthand)
+        local lefthand = initial
+        lefthand = parseIdentifier(tokens, lefthand)
+        local righthand = ""
+        righthand = parseIdentifier(tokens, righthand)
         return {
             type = "assignment",
             lefthand = lefthand,
@@ -295,37 +305,59 @@ local blockHandlers = {
             code[#code] = code[#code] .. ")"
         end,
         statement_self_op = function(code, block)
-            code[#code + 1] = block.lefthand .. "=" .. block.lefthand .. block.operation:sub(1, -2) .. block.righthand
+            block.operation = block.operation:sub(1, -2)
+            local oldLefthand = block.lefthand
+            local special = false
+            if block.operation == "===" then -- ====
+                block.lefthand = "type(" .. block.lefthand .. ")"
+                block.righthand = "type(" .. block.righthand .. ")"
+                block.operation = "=="
+                code[#code + 1] = oldLefthand .. "=" .. block.lefthand .. block.operation .. block.righthand
+                special = true
+            elseif block.operation == "appl" then -- apply
+                code[#code + 1] = block.lefthand .. "=" .. block.righthand .. "(" .. block.lefthand .. ")"
+                special = true
+            elseif block.operation == "!=" then -- !==
+                block.operation = "~="
+            elseif block.operation == "!==" then -- !===
+                block.lefthand = "type(" .. block.lefthand .. ")"
+                block.righthand = "type(" .. block.righthand .. ")"
+                block.operation = "~="
+                code[#code + 1] = oldLefthand .. "=" .. block.lefthand .. block.operation .. block.righthand
+                special = true
+            elseif block.operation == "<<" then -- <<=
+                local full = "bit32.lshift("..block.lefthand..", "..block.righthand..")"
+                code[#code + 1] = block.lefthand .. "=" .. full
+                special = true
+            elseif block.operation == ">>" then -- <<=
+                local full = "bit32.rshift("..block.lefthand..", "..block.righthand..")"
+                code[#code + 1] = block.lefthand .. "=" .. full
+                special = true
+            elseif block.operation == "&" then -- &=
+                local full = "bit32.band("..block.lefthand..", "..block.righthand..")"
+                code[#code + 1] = block.lefthand .. "=" .. full
+                special = true
+            elseif block.operation == "|" then -- |=
+                local full = "bit32.bor("..block.lefthand..", "..block.righthand..")"
+                code[#code + 1] = block.lefthand .. "=" .. full
+                special = true
+            elseif block.operation == "<<<" then
+                local full = "bit32.lrotate("..block.lefthand..", "..block.righthand..")"
+                code[#code + 1] = block.lefthand .. "=" .. full
+                special = true
+            elseif block.operation == ">>>" then
+                local full = "bit32.rrotate("..block.lefthand..", "..block.righthand..")"
+                code[#code + 1] = block.lefthand .. "=" .. full
+                special = true
+            end
+            if not special then
+                code[#code + 1] = block.lefthand .. "=" .. block.lefthand .. block.operation .. block.righthand
+            end
         end,
         statement_assignment = function(code, block)
-            code[#code + 1] = ""
-            local added = false
-            for _, name in ipairs(block.lefthand) do
-                if name == "(" then
-                    code[#code] = code[#code]:sub(1, -2)
-                elseif name == ")" then
-                    code[#code] = code[#code]:sub(1, -2)
-                else
-                    added = true
-                end
-                code[#code] = code[#code] .. name
-                if name ~= "(" then code[#code] = code[#code] .. "," end
-            end
-            if added then code[#code] = code[#code]:sub(1, -2) end
+            code[#code + 1] = block.lefthand
             code[#code] = code[#code] .. "="
-            added = false
-            for _, name in ipairs(block.righthand) do
-                if name == "(" then
-                    code[#code] = code[#code]:sub(1, -2)
-                elseif name == ")" then
-                    code[#code] = code[#code]:sub(1, -2)
-                else
-                    added = true
-                end
-                code[#code] = code[#code] .. name
-                if name ~= "(" then code[#code] = code[#code] .. "," end
-            end
-            if added then code[#code] = code[#code]:sub(1, -2) end
+            code[#code] = code[#code] .. block.righthand
         end,
         statement_return = function(code, block)
             code[#code + 1] = "return "
@@ -391,12 +423,15 @@ function talon.compile(ast, lang)
     return code
 end
 
-function talon.process(code, lang, release)
+function talon.process(code, lang, release, pretty)
     if not release then
-        return format(table.concat(talon.compile(talon.buildAST(talon.tokenize(code)), lang), "\n"))
-        --return table.concat(talon.compile(talon.buildAST(talon.tokenize(code)), lang), "\n")
+        if pretty then
+            return format(table.concat(talon.compile(talon.buildAST(talon.tokenize(code)), lang), "\n"))
+        else
+            return table.concat(talon.compile(talon.buildAST(talon.tokenize(code)), lang), "\n")
+        end
     else
-        local data = format(table.concat(talon.compile(talon.buildAST(talon.tokenize(code)), lang), "\n"))
+        local data = table.concat(talon.compile(talon.buildAST(talon.tokenize(code)), lang), "\n")
         local tokens = lex(data, 1, 2)
         minify(tokens)
         local retval = ""
