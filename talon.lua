@@ -197,14 +197,15 @@ function walkStatement(initial, tokens)
         }
     elseif peek == "+=" or peek == "-=" or
         peek == "*=" or peek == "/=" or
-        peek == "..=" or peek == "and=" or
-        peek == "or=" or peek == "%=" or
-        peek == "^=" or peek == "===" or
-        peek == "====" or peek == "apply" or
-        peek == "!==" or peek == "!===" or
-        peek == "<<=" or peek == ">>=" or 
+        peek == "idiv=" or peek == "%=" or
+        peek == "..=" or peek == "^=" or
+        peek == "&&=" or peek == "||=" or
+        peek == "<<=" or peek == ">>=" or
+        peek == "rol=" or peek == "ror=" or
         peek == "&=" or peek == "|=" or
-        peek == "<<<=" or peek == ">>>=" then
+        peek == "===" or peek == "!==" or
+        peek == "type===" or peek == "type!==" or
+        peek == "|>" then
         local operation = table.remove(tokens, 1).text
         local righthand = table.remove(tokens, 1).text
         assert(table.remove(tokens, 1).text == ";", "Expected closing ';'")
@@ -305,53 +306,40 @@ local blockHandlers = {
             code[#code] = code[#code] .. ")"
         end,
         statement_self_op = function(code, block)
-            block.operation = block.operation:sub(1, -2)
             local oldLefthand = block.lefthand
-            local special = false
-            if block.operation == "===" then -- ====
-                block.lefthand = "type(" .. block.lefthand .. ")"
-                block.righthand = "type(" .. block.righthand .. ")"
-                block.operation = "=="
-                code[#code + 1] = oldLefthand .. "=" .. block.lefthand .. block.operation .. block.righthand
-                special = true
-            elseif block.operation == "appl" then -- apply
+            if block.operation == "type===" then
+                code[#code + 1] = oldLefthand .. "= type(" .. block.lefthand .. ") == type(" .. block.righthand .. ")"
+            elseif block.operation == "type!==" then
+                code[#code + 1] = oldLefthand .. "= type(" .. block.lefthand .. ") ~= type(" .. block.righthand .. ")"
+            elseif block.operation == "|>" then
                 code[#code + 1] = block.lefthand .. "=" .. block.righthand .. "(" .. block.lefthand .. ")"
-                special = true
-            elseif block.operation == "!=" then -- !==
-                block.operation = "~="
-            elseif block.operation == "!==" then -- !===
-                block.lefthand = "type(" .. block.lefthand .. ")"
-                block.righthand = "type(" .. block.righthand .. ")"
-                block.operation = "~="
-                code[#code + 1] = oldLefthand .. "=" .. block.lefthand .. block.operation .. block.righthand
-                special = true
-            elseif block.operation == "<<" then -- <<=
-                local full = "bit32.lshift("..block.lefthand..", "..block.righthand..")"
-                code[#code + 1] = block.lefthand .. "=" .. full
-                special = true
-            elseif block.operation == ">>" then -- <<=
-                local full = "bit32.rshift("..block.lefthand..", "..block.righthand..")"
-                code[#code + 1] = block.lefthand .. "=" .. full
-                special = true
-            elseif block.operation == "&" then -- &=
-                local full = "bit32.band("..block.lefthand..", "..block.righthand..")"
-                code[#code + 1] = block.lefthand .. "=" .. full
-                special = true
-            elseif block.operation == "|" then -- |=
-                local full = "bit32.bor("..block.lefthand..", "..block.righthand..")"
-                code[#code + 1] = block.lefthand .. "=" .. full
-                special = true
-            elseif block.operation == "<<<" then
-                local full = "bit32.lrotate("..block.lefthand..", "..block.righthand..")"
-                code[#code + 1] = block.lefthand .. "=" .. full
-                special = true
-            elseif block.operation == ">>>" then
-                local full = "bit32.rrotate("..block.lefthand..", "..block.righthand..")"
-                code[#code + 1] = block.lefthand .. "=" .. full
-                special = true
-            end
-            if not special then
-                code[#code + 1] = block.lefthand .. "=" .. block.lefthand .. block.operation .. block.righthand
+            elseif block.operation == "!==" then
+                code[#code + 1] = block.lefthand .. "=" .. block.lefthand .. "~=" .. block.righthand
+            elseif block.operation == "<<=" then -- <<=
+                code[#code + 1] = block.lefthand .. "= bit32.lshift(" .. block.lefthand .. ", " .. block.righthand .. ")"
+            elseif block.operation == ">>=" then -- <<=
+                code[#code + 1] = block.lefthand .. "= bit32.rshift(" .. block.lefthand .. ", " .. block.righthand .. ")"
+            elseif block.operation == "&=" then  -- &=
+                code[#code + 1] = block.lefthand .. "= bit32.band(" .. block.lefthand .. ", " .. block.righthand .. ")"
+            elseif block.operation == "|=" then  -- |=
+                code[#code + 1] = block.lefthand ..
+                    "=" .. "bit32.bor(" .. block.lefthand .. ", " .. block.righthand .. ")"
+            elseif block.operation == "rol=" then
+                code[#code + 1] = block.lefthand ..
+                    "=" .. "bit32.lrotate(" .. block.lefthand .. ", " .. block.righthand .. ")"
+            elseif block.operation == "ror=" then
+                code[#code + 1] = block.lefthand ..
+                    "=" .. "bit32.rrotate(" .. block.lefthand .. ", " .. block.righthand .. ")"
+            elseif block.operation == "&&=" then -- &&=
+                code[#code + 1] = "if " ..
+                    block.lefthand .. " then " .. block.lefthand .. " = " .. block.righthand .. " end"
+            elseif block.operation == "||=" then -- ||=
+                code[#code + 1] = "if not " ..
+                    block.lefthand .. " then " .. block.lefthand .. " = " .. block.righthand .. " end"
+            elseif block.operation == "idiv=" then
+                code[#code + 1] = block.lefthand .. "= math.floor(" .. block.lefthand .. "/" .. block.righthand .. ")"
+            else
+                code[#code + 1] = block.lefthand .. "=" .. block.lefthand .. block.operation:sub(1,-2) .. block.righthand
             end
         end,
         statement_assignment = function(code, block)
