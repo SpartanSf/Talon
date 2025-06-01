@@ -57,7 +57,7 @@ local function install()
     updateStatus("Loading manifest...")
     drawProgressBar(0)
 
-    local manifestUrl = "https://raw.githubusercontent.com/SpartanSf/talon/master/manifest.txt"
+    local manifestUrl = "https://raw.githubusercontent.com/SpartanSf/Talon/master/manifest.txt"
     local response = http.get(manifestUrl)
     if not response then
         error("Failed to load manifest from: " .. manifestUrl)
@@ -89,7 +89,7 @@ local function install()
         local ratio = i / #steps
         if step.type == "file" then
             updateStatus("Downloading " .. step.localPath .. "...")
-            local fileUrl = "https://raw.githubusercontent.com/SpartanSf/talon/master/" .. step.remote
+            local fileUrl = "https://raw.githubusercontent.com/SpartanSf/Talon/master/" .. step.remote
             downloadFile(fileUrl, step.localPath)
         elseif step.type == "dir" then
             updateStatus("Creating folder: " .. step.path)
